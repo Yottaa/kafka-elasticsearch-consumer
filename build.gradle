@@ -38,7 +38,7 @@ ext {
     spring_version = '4.3.8.RELEASE'
     slf4j_version = '1.7.25'
     logback_version = '1.2.3'
-    kafka_version = '2.1.0'
+    kafka_version = '2.1.1'
     elasticsearch_version = '5.5.0'
 
 }
