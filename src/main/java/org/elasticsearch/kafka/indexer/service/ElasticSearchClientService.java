@@ -1,24 +1,30 @@
 package org.elasticsearch.kafka.indexer.service;
 
-import java.net.InetSocketAddress;
-import java.util.List;
-
-import javax.annotation.PostConstruct;
-import javax.annotation.PreDestroy;
-
+import com.google.common.collect.Iterables;
+import org.apache.http.HttpHost;
 import org.elasticsearch.action.admin.indices.alias.Alias;
-import org.elasticsearch.action.bulk.BulkRequestBuilder;
-import org.elasticsearch.action.index.IndexRequestBuilder;
-import org.elasticsearch.client.transport.TransportClient;
+import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest;
+import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
+import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
+import org.elasticsearch.action.index.IndexRequest;
+import org.elasticsearch.action.support.master.AcknowledgedResponse;
+import org.elasticsearch.client.RequestOptions;
+import org.elasticsearch.client.RestClient;
+import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.transport.TransportAddress;
+import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.kafka.indexer.exception.IndexerESNotRecoverableException;
-import org.elasticsearch.transport.client.PreBuiltTransportClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+
+import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Created by dhyan on 8/31/15.
@@ -29,6 +35,7 @@ public class ElasticSearchClientService {
 
     private static final Logger logger = LoggerFactory.getLogger(ElasticSearchClientService.class);
     public static final String CLUSTER_NAME = "cluster.name";
+    private static final String HTTP = "http";
 
     @Value("${elasticsearch.cluster.name:elasticsearch}")
     private String esClusterName;
@@ -43,32 +50,39 @@ public class ElasticSearchClientService {
 
     // TODO add when we can inject partition number into each bean
 	//private int currentPartition;
-	private TransportClient esTransportClient;
+
+	private RestHighLevelClient esClient;
+
 
     @PostConstruct
     public void init() throws Exception {
     	logger.info("Initializing ElasticSearchClient ...");
         // connect to elasticsearch cluster
         Settings settings = Settings.builder().put(CLUSTER_NAME, esClusterName).build();
+        List<HttpHost> hosts = new ArrayList<HttpHost>();
+
+
         try {
-        	
-        	//new PreBuiltTransportClient(
-            esTransportClient  = new PreBuiltTransportClient(settings);
+
             for (String eachHostPort : esHostPortList) {
                 logger.info("adding [{}] to TransportClient ... ", eachHostPort);
+
                 String[] hostPortTokens = eachHostPort.split(":");
-                if (hostPortTokens.length < 2) 
-                	throw new Exception("ERROR: bad ElasticSearch host:port configuration - wrong format: " + 
+                if (hostPortTokens.length < 2)
+                	throw new Exception("ERROR: bad ElasticSearch host:port configuration - wrong format: " +
                 		eachHostPort);
-                int port = 9300; // default ES port
+                int port = 9200; // default ES port
                 try {
                 	port = Integer.parseInt(hostPortTokens[1].trim());
                 } catch (Throwable e){
                 	logger.error("ERROR parsing port from the ES config [{}]- using default port 9300", eachHostPort);
                 }
-                esTransportClient.addTransportAddress(new TransportAddress(
-                		new InetSocketAddress(hostPortTokens[0].trim(), port)));
+               hosts.add(new HttpHost(hostPortTokens[0].trim(), port, HTTP));
+
             }
+
+			esClient = new RestHighLevelClient(RestClient.builder(Iterables.toArray(hosts, HttpHost.class)));
+
             logger.info("ElasticSearch Client created and intialized OK");
         } catch (Exception e) {
             logger.error("Exception trying to connect and create ElasticSearch Client: "+ e.getMessage());
@@ -80,10 +94,10 @@ public class ElasticSearchClientService {
     public void cleanup() throws Exception {
 		//logger.info("About to stop ES client for partition={} ...", currentPartition);
 		logger.info("About to stop ES client ...");
-		if (esTransportClient != null)
-			esTransportClient.close();
+		if (esClient != null)
+			esClient.close();
     }
-    
+
 	public void reInitElasticSearch() throws InterruptedException, IndexerESNotRecoverableException {
 		for (int i=1; i<=numberOfEsIndexingRetryAttempts; i++ ){
 			Thread.sleep(esIndexingRetrySleepTimeMs);
@@ -94,15 +108,15 @@ public class ElasticSearchClientService {
 				return;
 			} catch (Exception e) {
 				if (i<numberOfEsIndexingRetryAttempts){
-					//logger.warn("Re-trying to connect to ES, partition {}, try# {} - failed again: {}", 
-					//		currentPartition, i, e.getMessage());						
-					logger.warn("Re-trying to connect to ES, try# {} - failed again: {}", 
-							i, e.getMessage());						
+					//logger.warn("Re-trying to connect to ES, partition {}, try# {} - failed again: {}",
+					//		currentPartition, i, e.getMessage());
+					logger.warn("Re-trying to connect to ES, try# {} - failed again: {}",
+							i, e.getMessage());
 				} else {
 					//we've exhausted the number of retries - throw a IndexerESException to stop the IndexerJob thread
 					//logger.error("Re-trying connect to ES, partition {}, "
-					//		+ "try# {} - failed after the last retry; Will keep retrying ", currentPartition, i);						
-					logger.error("Re-trying connect to ES, try# {} - failed after the last retry", i);						
+					//		+ "try# {} - failed after the last retry; Will keep retrying ", currentPartition, i);
+					logger.error("Re-trying connect to ES, try# {} - failed after the last retry", i);
 					//throw new IndexerESException("ERROR: failed to connect to ES after max number of retiries, partition: " +
 					//		currentPartition);
 					throw new IndexerESNotRecoverableException("ERROR: failed to connect to ES after max number of retries: " + numberOfEsIndexingRetryAttempts);
@@ -111,45 +125,51 @@ public class ElasticSearchClientService {
 		}
 	}
 
-	public void deleteIndex(String index) {
-		esTransportClient.admin().indices().prepareDelete(index).execute().actionGet();
+	public void deleteIndex(String index) throws IOException {
+		DeleteIndexRequest request = new DeleteIndexRequest("posts");
+		AcknowledgedResponse deleteIndexResponse = esClient.indices().delete(request, RequestOptions.DEFAULT);
 		logger.info("Delete index {} successfully", index);
 	}
 
-	public void createIndex(String indexName){
-		esTransportClient.admin().indices().prepareCreate(indexName).execute().actionGet();
+	public void createIndex(String indexName) throws IOException {
+		CreateIndexRequest request = new CreateIndexRequest(indexName);
+		AcknowledgedResponse createIndexResponse = esClient.indices().create(request, RequestOptions.DEFAULT);
 		logger.info("Created index {} successfully",  indexName);
 	}
 
-	public void createIndexAndAlias(String indexName,String aliasName){
-		esTransportClient.admin().indices().prepareCreate(indexName).addAlias(new Alias(aliasName)).execute().actionGet();
+	public void createIndexAndAlias(String indexName,String aliasName) throws IOException {
+		CreateIndexRequest request = new CreateIndexRequest(indexName);
+		request.alias(new Alias(aliasName));
+		AcknowledgedResponse createIndexResponse = esClient.indices().create(request, RequestOptions.DEFAULT);
+
 		logger.info("Created index {} with alias {} successfully" ,indexName,aliasName);
 	}
 
-	public void addAliasToExistingIndex(String indexName, String aliasName) {
-		esTransportClient.admin().indices().prepareAliases().addAlias(indexName, aliasName).execute().actionGet();
+	public void addAliasToExistingIndex(String indexName, String aliasName) throws IOException {
+		IndicesAliasesRequest request = new IndicesAliasesRequest();
+		IndicesAliasesRequest.AliasActions aliasAction =
+				new IndicesAliasesRequest.AliasActions(IndicesAliasesRequest.AliasActions.Type.ADD)
+						.index(indexName)
+						.alias(aliasName);
+		request.addAliasAction(aliasAction);
+		AcknowledgedResponse addAliasResponse = esClient.indices().updateAliases(request, RequestOptions.DEFAULT);
 		logger.info("Added alias {} to index {} successfully" ,aliasName,indexName);
 	}
-	
-	public void addAliasWithRoutingToExistingIndex(String indexName, String aliasName, String field, String fieldValue) {
-		esTransportClient.admin().indices().prepareAliases().addAlias(indexName, aliasName, QueryBuilders.termQuery(field, fieldValue)).execute().actionGet();
+
+	public void addAliasWithRoutingToExistingIndex(String indexName, String aliasName, String field, String fieldValue) throws IOException {
+		CreateIndexRequest request = new CreateIndexRequest(indexName);
+		request.alias(new Alias(aliasName).filter(QueryBuilders.termQuery(field, fieldValue)));
+		AcknowledgedResponse createIndexResponse = esClient.indices().create(request, RequestOptions.DEFAULT);
 		logger.info("Added alias {} to index {} successfully" ,aliasName,indexName);
 	}
 
-	public IndexRequestBuilder prepareIndex(String indexName, String indexType, String eventUUID) {
-		return esTransportClient.prepareIndex(indexName, indexType, eventUUID);
+	public IndexRequest prepareIndexRequest(String inputMessage, String indexName, String indexType, String eventUUID){
+		IndexRequest indexRequest = new IndexRequest().id(eventUUID).type(indexType).source(inputMessage, XContentType.JSON).index(indexName);
+    	return indexRequest;
 	}
 
-	public IndexRequestBuilder prepareIndex(String indexName, String indexType) {
-		return esTransportClient.prepareIndex(indexName, indexType);
-	}
-
-	public BulkRequestBuilder prepareBulk() {
-		return esTransportClient.prepareBulk();
-	}
-
-	public TransportClient getEsTransportClient() {
-		return esTransportClient;
+	public RestHighLevelClient getEsClient() {
+		return esClient;
 	}
 
 }
