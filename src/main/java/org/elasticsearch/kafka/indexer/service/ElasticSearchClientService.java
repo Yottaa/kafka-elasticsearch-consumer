@@ -1,20 +1,31 @@
 package org.elasticsearch.kafka.indexer.service;
 
-import java.net.InetSocketAddress;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 
-import org.elasticsearch.action.admin.indices.alias.Alias;
+import org.apache.http.Header;
+import org.apache.http.HttpHost;
+import org.apache.http.message.BasicHeader;
+import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest;
+import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest.AliasActions;
+import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
+import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
+import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.index.IndexRequestBuilder;
-import org.elasticsearch.client.transport.TransportClient;
+import org.elasticsearch.action.support.master.AcknowledgedResponse;
+import org.elasticsearch.client.RequestOptions;
+import org.elasticsearch.client.RestClient;
+import org.elasticsearch.client.RestClientBuilder;
+import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.client.indices.CreateIndexRequest;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.transport.TransportAddress;
-import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.kafka.indexer.exception.IndexerESNotRecoverableException;
-import org.elasticsearch.transport.client.PreBuiltTransportClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -43,7 +54,7 @@ public class ElasticSearchClientService {
 
     // TODO add when we can inject partition number into each bean
 	//private int currentPartition;
-	private TransportClient esTransportClient;
+	private RestHighLevelClient esTransportClient;
 
     @PostConstruct
     public void init() throws Exception {
@@ -52,23 +63,24 @@ public class ElasticSearchClientService {
         Settings settings = Settings.builder().put(CLUSTER_NAME, esClusterName).build();
         try {
         	
-        	//new PreBuiltTransportClient(
-            esTransportClient  = new PreBuiltTransportClient(settings);
-            for (String eachHostPort : esHostPortList) {
-                logger.info("adding [{}] to TransportClient ... ", eachHostPort);
-                String[] hostPortTokens = eachHostPort.split(":");
-                if (hostPortTokens.length < 2) 
-                	throw new Exception("ERROR: bad ElasticSearch host:port configuration - wrong format: " + 
-                		eachHostPort);
-                int port = 9300; // default ES port
-                try {
-                	port = Integer.parseInt(hostPortTokens[1].trim());
-                } catch (Throwable e){
-                	logger.error("ERROR parsing port from the ES config [{}]- using default port 9300", eachHostPort);
-                }
-                esTransportClient.addTransportAddress(new TransportAddress(
-                		new InetSocketAddress(hostPortTokens[0].trim(), port)));
-            }
+    		
+			String apiKeyId = "";
+			String apiKeySecret = "";
+			String apiKeyAuth =
+			    Base64.getEncoder().encodeToString(
+			        (apiKeyId + ":" + apiKeySecret)
+			            .getBytes(StandardCharsets.UTF_8));
+			RestClientBuilder builder = RestClient.builder(
+			    new HttpHost("", 9200, "http"));
+			Header[] defaultHeaders =
+			    new Header[]{new BasicHeader("Authorization",
+			        "ApiKey " + apiKeyAuth)};
+			builder.setDefaultHeaders(defaultHeaders);	
+			
+			
+			esTransportClient = new RestHighLevelClient(
+				builder);
+            
             logger.info("ElasticSearch Client created and intialized OK");
         } catch (Exception e) {
             logger.error("Exception trying to connect and create ElasticSearch Client: "+ e.getMessage());
@@ -112,43 +124,71 @@ public class ElasticSearchClientService {
 	}
 
 	public void deleteIndex(String index) {
-		esTransportClient.admin().indices().prepareDelete(index).execute().actionGet();
+		DeleteIndexRequest request = new DeleteIndexRequest(index); 
+		try {
+			esTransportClient.indices().delete(request, RequestOptions.DEFAULT);
+		} catch (IOException e) {
+			logger.error("Can't delete index " + index);
+		}
 		logger.info("Delete index {} successfully", index);
 	}
 
 	public void createIndex(String indexName){
-		esTransportClient.admin().indices().prepareCreate(indexName).execute().actionGet();
+		CreateIndexRequest request = new CreateIndexRequest(indexName); 
+		try {
+			esTransportClient.indices().create(request, RequestOptions.DEFAULT);
+		} catch (IOException e) {
+			logger.error("Can't create index " + indexName);
+		}
 		logger.info("Created index {} successfully",  indexName);
 	}
 
 	public void createIndexAndAlias(String indexName,String aliasName){
-		esTransportClient.admin().indices().prepareCreate(indexName).addAlias(new Alias(aliasName)).execute().actionGet();
+		createIndex(indexName);
+		IndicesAliasesRequest request = new IndicesAliasesRequest(); 
+		AliasActions aliasAction =
+		        new AliasActions(AliasActions.Type.ADD)
+		        .index(indexName)
+		        .alias(aliasName); 
+		request.addAliasAction(aliasAction);
+		try {
+			AcknowledgedResponse indicesAliasesResponse =
+					esTransportClient.indices().updateAliases(request, RequestOptions.DEFAULT);
+		} catch (IOException e) {
+			logger.error("Can't create alias " + aliasName);
+		}
+		
 		logger.info("Created index {} with alias {} successfully" ,indexName,aliasName);
 	}
 
 	public void addAliasToExistingIndex(String indexName, String aliasName) {
-		esTransportClient.admin().indices().prepareAliases().addAlias(indexName, aliasName).execute().actionGet();
+		IndicesAliasesRequest request = new IndicesAliasesRequest(); 
+		AliasActions aliasAction =
+		        new AliasActions(AliasActions.Type.ADD)
+		        .index(indexName)
+		        .alias(aliasName); 
+		request.addAliasAction(aliasAction);
+		try {
+			AcknowledgedResponse indicesAliasesResponse =
+					esTransportClient.indices().updateAliases(request, RequestOptions.DEFAULT);
+		} catch (IOException e) {
+			logger.error("Can't create alias " + aliasName);
+		}
 		logger.info("Added alias {} to index {} successfully" ,aliasName,indexName);
 	}
 	
-	public void addAliasWithRoutingToExistingIndex(String indexName, String aliasName, String field, String fieldValue) {
-		esTransportClient.admin().indices().prepareAliases().addAlias(indexName, aliasName, QueryBuilders.termQuery(field, fieldValue)).execute().actionGet();
-		logger.info("Added alias {} to index {} successfully" ,aliasName,indexName);
+//	public void addAliasWithRoutingToExistingIndex(String indexName, String aliasName, String field, String fieldValue) {
+//		esTransportClient.admin().indices().prepareAliases().addAlias(indexName, aliasName, QueryBuilders.termQuery(field, fieldValue)).execute().actionGet();
+//		logger.info("Added alias {} to index {} successfully" ,aliasName,indexName);
+//	}
+
+
+
+	public BulkResponse executeBulk(BulkRequest bulkRequest) throws IOException {
+		return esTransportClient.bulk(bulkRequest, RequestOptions.DEFAULT);
 	}
 
-	public IndexRequestBuilder prepareIndex(String indexName, String indexType, String eventUUID) {
-		return esTransportClient.prepareIndex(indexName, indexType, eventUUID);
-	}
-
-	public IndexRequestBuilder prepareIndex(String indexName, String indexType) {
-		return esTransportClient.prepareIndex(indexName, indexType);
-	}
-
-	public BulkRequestBuilder prepareBulk() {
-		return esTransportClient.prepareBulk();
-	}
-
-	public TransportClient getEsTransportClient() {
+	public RestHighLevelClient getEsTransportClient() {
 		return esTransportClient;
 	}
 

@@ -1,5 +1,6 @@
 package org.elasticsearch.kafka.indexer.service;
 
+import java.io.IOException;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Set;
@@ -7,8 +8,10 @@ import java.util.concurrent.ExecutionException;
 
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.bulk.BulkItemResponse;
+import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
 import org.elasticsearch.action.bulk.BulkResponse;
+import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.client.transport.NoNodeAvailableException;
 import org.elasticsearch.common.xcontent.XContentType;
@@ -31,7 +34,7 @@ public class ElasticSearchBatchService {
     private static final Logger logger = LoggerFactory.getLogger(ElasticSearchBatchService.class);
     private static final String SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE";
     private static final String INTERNAL_SERVER_ERROR = "INTERNAL_SERVER_ERROR";
-    private BulkRequestBuilder bulkRequestBuilder;
+    private BulkRequest bulkRequest;
     private Set<String> indexNames = new HashSet<>();
    
     @Value("${elasticsearch.reconnect.attempt.wait.ms:10000}")
@@ -41,8 +44,8 @@ public class ElasticSearchBatchService {
     private ElasticSearchClientService elasticSearchClientService;
 
     private void initBulkRequestBuilder(){
-    	if (bulkRequestBuilder == null){
-    		bulkRequestBuilder = elasticSearchClientService.prepareBulk();
+    	if (bulkRequest == null){
+    		bulkRequest = new BulkRequest();
     	}
     }
     
@@ -57,40 +60,39 @@ public class ElasticSearchBatchService {
      */
     public void addEventToBulkRequest(String inputMessage, String indexName, String indexType, String eventUUID, String routingValue) throws ExecutionException {
     	initBulkRequestBuilder();
-        IndexRequestBuilder indexRequestBuilder = elasticSearchClientService.prepareIndex(indexName, indexType, eventUUID);
-        indexRequestBuilder.setSource(inputMessage, XContentType.JSON);
-        if (routingValue != null && routingValue.trim().length()>0) {
-            indexRequestBuilder.setRouting(routingValue);
-        }
-        bulkRequestBuilder.add(indexRequestBuilder);
+        IndexRequest indexRequest = new IndexRequest(indexName);
+        indexRequest.source(inputMessage, XContentType.JSON);
+        indexRequest.id(eventUUID);
+       
+        bulkRequest.add(indexRequest);
         indexNames.add(indexName);
     }
 
 	public void postToElasticSearch() throws InterruptedException, IndexerESRecoverableException, IndexerESNotRecoverableException {
 		try {
-			if (bulkRequestBuilder != null) {
+			if (bulkRequest != null) {
 				logger.info("Starting bulk posts to ES");
 
-				postBulkToEs(bulkRequestBuilder);
-				logger.info("Bulk post to ES finished Ok for indexes: {}; # of messages: {}", indexNames, bulkRequestBuilder.numberOfActions());
+				postBulkToEs(bulkRequest);
+				logger.info("Bulk post to ES finished Ok for indexes: {}; # of messages: {}", indexNames, bulkRequest.numberOfActions());
 			}
 		} finally {
-			bulkRequestBuilder = null;
+			bulkRequest = null;
 			indexNames.clear();
 		}
 	}
 
-    protected void postBulkToEs(BulkRequestBuilder bulkRequestBuilder)
+    protected void postBulkToEs(BulkRequest bulkRequest)
             throws InterruptedException, IndexerESRecoverableException, IndexerESNotRecoverableException {
         BulkResponse bulkResponse = null;
         BulkItemResponse bulkItemResp = null;
         //Nothing/NoMessages to post to ElasticSearch
-        if (bulkRequestBuilder.numberOfActions() <= 0) {
+        if (bulkRequest.numberOfActions() <= 0) {
             logger.warn("No messages to post to ElasticSearch - returning");
             return;
         }
         try {
-            bulkResponse = bulkRequestBuilder.execute().actionGet();
+            bulkResponse = elasticSearchClientService.executeBulk(bulkRequest);
         } catch (NoNodeAvailableException e) {
             // ES cluster is unreachable or down. Re-try up to the configured number of times
             // if fails even after then - throw an exception out to retry indexing the batch
@@ -103,7 +105,10 @@ public class ElasticSearchBatchService {
         } catch (ElasticsearchException e) {
             logger.error("Failed to post messages to ElasticSearch: " + e.getMessage(), e);
             throw new IndexerESRecoverableException(e);
-        } 
+        } catch (IOException e) {
+        	  logger.error("Failed to post messages to ElasticSearch: " + e.getMessage(), e);
+              throw new IndexerESRecoverableException(e);
+		} 
         logger.debug("Time to post messages to ElasticSearch: {} ms", bulkResponse.getIngestTookInMillis());
         if (bulkResponse.hasFailures()) {
             logger.error("Bulk Message Post to ElasticSearch has errors: {}",
