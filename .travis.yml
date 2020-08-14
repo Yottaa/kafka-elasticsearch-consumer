@@ -3,6 +3,7 @@ branches:
   only:
     - master
     - ES-5.5
+    - RestAPI
 language: java
 jdk: openjdk8
 install:
