@@ -15,9 +15,7 @@ import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest;
 import org.elasticsearch.action.admin.indices.alias.IndicesAliasesRequest.AliasActions;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
 import org.elasticsearch.action.bulk.BulkRequest;
-import org.elasticsearch.action.bulk.BulkRequestBuilder;
 import org.elasticsearch.action.bulk.BulkResponse;
-import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestClient;
@@ -43,8 +41,18 @@ public class ElasticSearchClientService {
 
     @Value("${elasticsearch.cluster.name:elasticsearch}")
     private String esClusterName;
-    @Value("#{'${elasticsearch.hosts.list:localhost:9300}'.split(',')}")
-    private List<String> esHostPortList;
+    @Value("${elasticsearch.cluster.api.keyid:keyidPlaceholder}")
+    private String keyId;
+    @Value("${elasticsearch.cluster.api.keysecret:secretKeyPlaceholder}")
+    private String keySecret;
+    
+    
+    @Value("${elasticsearch.cluster.host:localhost}")
+    private String esHost;
+   
+    @Value("${elasticsearch.cluster.port:9423}")
+    private int esPort;
+        
     // sleep time in ms between attempts to index data into ES again
     @Value("${elasticsearch.indexing.retry.sleep.ms:10000}")
     private   int esIndexingRetrySleepTimeMs;
@@ -63,15 +71,12 @@ public class ElasticSearchClientService {
         Settings settings = Settings.builder().put(CLUSTER_NAME, esClusterName).build();
         try {
         	
-    		
-			String apiKeyId = "";
-			String apiKeySecret = "";
 			String apiKeyAuth =
 			    Base64.getEncoder().encodeToString(
-			        (apiKeyId + ":" + apiKeySecret)
+			        (keyId + ":" + keySecret)
 			            .getBytes(StandardCharsets.UTF_8));
 			RestClientBuilder builder = RestClient.builder(
-			    new HttpHost("", 9200, "http"));
+			    new HttpHost(esHost, esPort, "https"));
 			Header[] defaultHeaders =
 			    new Header[]{new BasicHeader("Authorization",
 			        "ApiKey " + apiKeyAuth)};
@@ -80,6 +85,10 @@ public class ElasticSearchClientService {
 			
 			esTransportClient = new RestHighLevelClient(
 				builder);
+			
+//			IndexRequest request = new IndexRequest("pn-test3");
+//			request.source("{\"name\": 100}", XContentType.JSON);
+//			esTransportClient.index(request, RequestOptions.DEFAULT);
             
             logger.info("ElasticSearch Client created and intialized OK");
         } catch (Exception e) {
@@ -177,10 +186,7 @@ public class ElasticSearchClientService {
 		logger.info("Added alias {} to index {} successfully" ,aliasName,indexName);
 	}
 	
-//	public void addAliasWithRoutingToExistingIndex(String indexName, String aliasName, String field, String fieldValue) {
-//		esTransportClient.admin().indices().prepareAliases().addAlias(indexName, aliasName, QueryBuilders.termQuery(field, fieldValue)).execute().actionGet();
-//		logger.info("Added alias {} to index {} successfully" ,aliasName,indexName);
-//	}
+
 
 
 
