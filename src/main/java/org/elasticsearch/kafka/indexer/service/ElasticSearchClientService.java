@@ -3,7 +3,6 @@ package org.elasticsearch.kafka.indexer.service;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
-import java.util.List;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
@@ -70,11 +69,12 @@ public class ElasticSearchClientService {
         // connect to elasticsearch cluster
         Settings settings = Settings.builder().put(CLUSTER_NAME, esClusterName).build();
         try {
-        	
+
 			String apiKeyAuth =
 			    Base64.getEncoder().encodeToString(
 			        (keyId + ":" + keySecret)
 			            .getBytes(StandardCharsets.UTF_8));
+		
 			RestClientBuilder builder = RestClient.builder(
 			    new HttpHost(esHost, esPort, "https"));
 			Header[] defaultHeaders =
@@ -84,11 +84,7 @@ public class ElasticSearchClientService {
 			
 			
 			esTransportClient = new RestHighLevelClient(
-				builder);
-			
-//			IndexRequest request = new IndexRequest("pn-test3");
-//			request.source("{\"name\": 100}", XContentType.JSON);
-//			esTransportClient.index(request, RequestOptions.DEFAULT);
+				builder);		
             
             logger.info("ElasticSearch Client created and intialized OK");
         } catch (Exception e) {
