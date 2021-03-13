@@ -18,6 +18,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 /**
  * 
  * This is an example of a Batch Message Processor that pushes (indexes) events 
@@ -26,13 +29,16 @@ import org.springframework.beans.factory.annotation.Value;
  * for example Cassandra, Postgres, Spark, etc.
  *
  */
-public class ESBatchMessageProcessorImpl implements IBatchProcessor {
+public class CustomEsMessageProcessorImpl implements IBatchProcessor {
 
-    private static final Logger logger = LoggerFactory.getLogger(ESBatchMessageProcessorImpl.class);
+    private static final Logger logger = LoggerFactory.getLogger(CustomEsMessageProcessorImpl.class);
 
     private ElasticSearchBatchService elasticSearchBatchService = null;
 	@Value("${elasticsearch.index.name:my_index}")
 	private String indexName;
+	private String indexPrefix = "test_";
+
+	private ObjectMapper mapper = new ObjectMapper();
 
 
     /* (non-Javadoc)
@@ -47,9 +53,18 @@ public class ESBatchMessageProcessorImpl implements IBatchProcessor {
             return false;
         }
         
-        ///UPDATE IT
+        JsonNode fullJsonTree = mapper.readTree(inputMessage);
+        
+		if (fullJsonTree.get("log_level") == null) 
+		return false;
+				
+		//Separate data in different indices, based on log level
+		indexName = indexPrefix + fullJsonTree.get("log_level").asText();
+        
 		elasticSearchBatchService.addEventToBulkRequest(inputMessage, indexName, eventUUID);
-        return true;
+       
+		
+		return true;
     }
 
 

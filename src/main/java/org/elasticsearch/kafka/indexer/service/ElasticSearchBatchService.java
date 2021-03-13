@@ -67,6 +67,25 @@ public class ElasticSearchBatchService {
         bulkRequest.add(indexRequest);
         indexNames.add(indexName);
     }
+    
+    /**
+     * 
+     * @param inputMessage - message body 	
+     * @param indexName - ES index name to index this event into 
+     * @param indexType - index type of the ES 
+     * @param eventUUID - uuid of the event - if needed for routing or as a UUID to use for ES documents; can be NULL
+     * @param routingValue - value to use for ES index routing - if needed; can be null if routing is not needed 
+     * @throws ExecutionException
+     */
+    public void addEventToBulkRequest(String inputMessage, String indexName, String eventUUID) throws ExecutionException {
+    	initBulkRequestBuilder();
+        IndexRequest indexRequest = new IndexRequest(indexName);
+        indexRequest.source(inputMessage, XContentType.JSON);
+        indexRequest.id(eventUUID);
+       
+        bulkRequest.add(indexRequest);
+        indexNames.add(indexName);
+    }
 
 	public void postToElasticSearch() throws InterruptedException, IndexerESRecoverableException, IndexerESNotRecoverableException {
 		try {
