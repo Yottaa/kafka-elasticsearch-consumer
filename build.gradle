@@ -118,30 +118,19 @@ publishing {
             version project.version
         }
     }
-}
-
-bintray {
-    //dryRun = true
-    user = artifact_provider_user
-    key = artifact_provider_secret
-    publications = ['MyPublication']
-    publish = true
-    pkg {
-        repo = 'bigdatadevs-repo'
-        name = 'org.elasticsearch.kafka.indexer:kafka-elasticsearch-consumer'
-        userOrg = artifact_provider_org
-        licenses = ['Apache-2.0']
-        vcsUrl = artifact_provider_url
-        version {
-            name = project.version
-            desc = 'Current version'
-            released  = new Date()
-            vcsTag = '0.0.2'
-            attributes = ['gradle-plugin': 'com.use.less:com.use.less.gradle:gradle-useless-plugin']
+    repositories {
+        maven {
+            name 'publicationRepo'
+            credentials {
+                username=artifact_provider_user
+                password=artifact_provider_secret
+            }
+            // change to point to your repo, e.g. http://my.org/repo
+            url "${artifact_provider_url}"
         }
     }
-    configurations = ['archives']
 }
+
 run {
     // support passing -Dsystem.property=value to bootRun task
     systemProperties = System.properties

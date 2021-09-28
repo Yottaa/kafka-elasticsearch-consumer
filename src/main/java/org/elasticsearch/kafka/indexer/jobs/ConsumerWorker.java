@@ -5,21 +5,12 @@
 package org.elasticsearch.kafka.indexer.jobs;
 
 import java.time.Duration;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.annotation.Resource;
 
-import org.apache.kafka.clients.consumer.Consumer;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
-import org.apache.kafka.clients.consumer.RetriableCommitFailedException;
+import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -60,6 +51,18 @@ public class ConsumerWorker implements AutoCloseable, IConsumerWorker {
     private AtomicBoolean running = new AtomicBoolean(false);
     private int consumerInstanceId;
 
+    //this is a segregated interface that only exposes the OffsetCommitCallback, and behaves like a class local reference to whatever offsetLoggingCallback is set to, in this instance.
+    private final OffsetCommitCallback useCurrentLoggingCallback = (parts, problem)-> {
+        if (this.offsetLoggingCallback != null) {
+            this.offsetLoggingCallback.onComplete(parts, problem);
+        }
+    };
+
+//    private ReadCommitStrategy.Factory<String,String> readCommitStrategyFactory = SendAllCommits::new; //use this one, to default to original behavior.
+    private ReadCommitStrategy.Factory<String,String> readCommitStrategyFactory = SendLatestCommitAfterReply::new; //default to latest at time of reply or failure
+
+    private ReadCommitStrategy readCommitStrategy;
+
     public ConsumerWorker() {        
     }
     
@@ -75,10 +78,10 @@ public class ConsumerWorker implements AutoCloseable, IConsumerWorker {
         String consumerClientId = consumerInstanceName + "-" + consumerInstanceId;
         kafkaProperties.put(ConsumerConfig.CLIENT_ID_CONFIG, consumerClientId);
         kafkaProperties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        consumer = new KafkaConsumer<>(kafkaProperties);
+        this.setConsumer(new KafkaConsumer<>(kafkaProperties));
         logger.info(
             "Created ConsumerWorker with properties: consumerClientId={}, consumerInstanceName={}, kafkaTopic={}, kafkaProperties={}",
-            consumerClientId, consumerInstanceName, kafkaTopic, kafkaProperties);        
+            consumerClientId, consumerInstanceName, kafkaTopic, kafkaProperties);
     }
     
     @Override
@@ -257,22 +260,8 @@ public class ConsumerWorker implements AutoCloseable, IConsumerWorker {
     }
     
     private void commitOffsetsIfNeeded(boolean shouldCommitThisPoll, Map<TopicPartition, OffsetAndMetadata> partitionOffsetMap) {
-        try {
-            if (shouldCommitThisPoll) {
-                long commitStartTime = System.nanoTime();
-                if(partitionOffsetMap == null){
-                    consumer.commitAsync(offsetLoggingCallback);
-                } else {
-                    consumer.commitAsync(partitionOffsetMap, offsetLoggingCallback);
-                }
-                long commitTime = System.nanoTime() - commitStartTime;
-                logger.info("Commit successful for partitions/offsets : {} in {} ns", partitionOffsetMap, commitTime);
-            } else {
-                logger.debug("shouldCommitThisPoll = FALSE --> not committing offsets yet");
-            }
-        } catch (RetriableCommitFailedException e){
-            logger.error("caught RetriableCommitFailedException while committing offsets : {}; abandoning the commit", partitionOffsetMap, e);
-        }
+        //previous hardcoded implementation behavior moved to SendAllCommits strategy class.
+        readCommitStrategy.commitOffsetsIfNeeded(shouldCommitThisPoll, partitionOffsetMap);
     }
 
     private Map<TopicPartition, OffsetAndMetadata> getPreviousPollEndPosition() {
@@ -334,6 +323,8 @@ public class ConsumerWorker implements AutoCloseable, IConsumerWorker {
 
 	public void setConsumer(Consumer<String, String> consumer) {
 		this.consumer = consumer;
+		//let the current strategy factory see the new consumer, so our commit strategy can shift consumer targets, if needed.
+        this.readCommitStrategy = readCommitStrategyFactory.build( consumer, useCurrentLoggingCallback );
 	}
 
 	public void setConsumerInstanceId(int consumerInstanceId) {
