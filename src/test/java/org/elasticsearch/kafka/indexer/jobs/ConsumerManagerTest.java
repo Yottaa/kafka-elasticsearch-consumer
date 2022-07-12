@@ -99,7 +99,7 @@ public class ConsumerManagerTest {
 		CONSUMER.rebalance(PARTITIONS);
 		CONSUMER_MANAGER.determineOffsetForAllPartitionsAndSeek(StartOption.CUSTOM);
 		for (TopicPartition topicPartition: PARTITIONS) {
-			Assert.assertEquals(BEGINNING_OFFSET_POSITION, CONSUMER.position(topicPartition));
+			Assert.assertEquals((topicPartition.partition()*10)+10, CONSUMER.position(topicPartition));
 		}
 	}
 
