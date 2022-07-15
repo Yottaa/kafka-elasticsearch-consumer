@@ -38,8 +38,8 @@ ext {
     spring_version = '4.3.8.RELEASE'
     slf4j_version = '1.7.25'
     logback_version = '1.2.3'
-    kafka_version = '2.1.1'
-    elasticsearch_version = '6.6.0'
+    kafka_version = '2.8.1'
+    elasticsearch_version = '7.17.4'
 }
 
 configurations.all {
@@ -57,32 +57,34 @@ configurations.all {
 
 dependencies {
     // https://mvnrepository.com/artifact/org.elasticsearch/elasticsearch
-    compile group: 'org.elasticsearch', name: 'elasticsearch', version: elasticsearch_version
+    implementation group: 'org.elasticsearch', name: 'elasticsearch', version: elasticsearch_version
     // https://mvnrepository.com/artifact/org.elasticsearch.client/transport
-    compile group: 'org.elasticsearch.client', name: 'transport', version: elasticsearch_version
+    implementation group: 'org.elasticsearch.client', name: 'transport', version: elasticsearch_version
     // https://mvnrepository.com/artifact/org.apache.kafka/kafka-clients
-    compile group: 'org.apache.kafka', name: 'kafka-clients', version: kafka_version
+    implementation group: 'org.apache.kafka', name: 'kafka-clients', version: kafka_version
     // https://mvnrepository.com/artifact/com.google.guava/guava
-    compile group: 'com.google.guava', name: 'guava', version: '19.0'
+    implementation group: 'com.google.guava', name: 'guava', version: '19.0'
 
     // https://mvnrepository.com/artifact/org.springframework/
-    compile group: 'org.springframework', name: 'spring-core', version: spring_version
-    compile group: 'org.springframework', name: 'spring-context', version: spring_version
+    implementation group: 'org.springframework', name: 'spring-core', version: spring_version
+    implementation group: 'org.springframework', name: 'spring-context', version: spring_version
 
     // https://mvnrepository.com/artifact/org.slf4j/slf4j-api
-    compile group: 'org.slf4j', name: 'slf4j-api', version: slf4j_version
+    implementation group: 'org.slf4j', name: 'slf4j-api', version: slf4j_version
     // https://mvnrepository.com/artifact/org.apache.logging.log4j/log4j-to-slf4j
-    compile group: 'org.apache.logging.log4j', name: 'log4j-to-slf4j', version: '2.8.2'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-to-slf4j', version: '2.8.2'
     // https://mvnrepository.com/artifact/ch.qos.logback/logback-core
-    compile group: 'ch.qos.logback', name: 'logback-core', version: logback_version
+    implementation group: 'ch.qos.logback', name: 'logback-core', version: logback_version
     // https://mvnrepository.com/artifact/ch.qos.logback/logback-classic
-    compile group: 'ch.qos.logback', name: 'logback-classic', version: logback_version
+    implementation group: 'ch.qos.logback', name: 'logback-classic', version: logback_version
     // https://mvnrepository.com/artifact/org.apache.commons/commons-lang3
-    compile group: 'org.apache.commons', name: 'commons-lang3', version: '3.6'
+    implementation group: 'org.apache.commons', name: 'commons-lang3', version: '3.6'
+    // missing in JDK since Java 11
+    implementation group: 'javax.annotation', name: 'javax.annotation-api', version: '1.3.2'
 
-    testCompile group: 'junit', name: 'junit', version: '4.12'
-    testCompile group: 'org.mockito', name: 'mockito-all', version: '1.10.19'
-    testCompile group: 'org.springframework', name: 'spring-test', version: spring_version
+    testImplementation group: 'junit', name: 'junit', version: '4.12'
+    testImplementation group: 'org.mockito', name: 'mockito-all', version: '1.10.19'
+    testImplementation group: 'org.springframework', name: 'spring-test', version: spring_version
 }
 
 processResources {
